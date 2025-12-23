@@ -1,0 +1,229 @@
+name: Robust Fork Build
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache .NET packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/SRAFrontend.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Cache Python packages
+        uses: actions/cache@v3
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Verify project structure
+        run: |
+          echo "=== Project Structure Verification ==="
+          if (Test-Path "SRAFrontend\SRAFrontend.csproj") {
+            echo "✅ .NET projec
+          } else {
+            echo "❌ .NET project missing"
+            exit 1
+          }
+
+          if (Test-Path "requirements.txt") {
+            echo "✅ Python requirements found"
+          } else {
+            echo "❌ Python requirements missing"
+            exit 1
+          }
+
+          if (Test-Path "version.json") {
+            echo "✅ Version file found"
+          } else {
+            echo "❌ Version file missing"
+            exit 1
+          }
+
+      - name: Install Python dependencies
+        run: |
+          echo "=== Installing Python Dependencies ==="
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "✅ Python dependencies installed"
+
+      - name: Restore .NET dependencies
+        run: |
+          echo "=== Restoring .NET Dependencies ==="
+          dotnet restore SRAFrontend\SRAFrontend.csproj --verbosity minimal
+          echo "✅ .NET dependencies restored"
+
+      - name: Build .NET project
+        run: |
+          echo "=== Building .NET Project ==="
+          dotnet build SRAFrontend\SRAFrontend.csproj -c Release --no-restore --verbosity minimal
+          echo "✅ .NET project built successfully"
+
+      - name: Publish .NET project
+        run: |
+          echo "=== Publishing .NET Project ==="
+          dotnet publish SRAFrontend\SRAFrontend.csproj -c Release -r win-x64 --self-contained false --no-build -o SRAFrontend\bin\Release\net8.0\win-x64\publish
+          echo "✅ .NET project published successfully"
+
+      - name: Verify publish output
+        run: |
+          echo "=== Verifying Publish Output ==="
+          $publishDir = "SRAFrontend\bin\Release\net8.0\win-x64\publish"
+          if (Test-Path $publishDir) {
+            echo "✅ Publish directory exists"
+            $files = Get-ChildItem $publishDir -Name
+            echo "Published files:"
+            $files | ForEach-Object { echo "  - $_" }
+
+            if (Test-Path "$publishDir\SRA.exe") {
+              echo "✅ Main executable found"
+            } else {
+              echo "❌ Main executable missing"
+              exit 1
+            }
+          } else {
+            echo "❌ Publish directory missing"
+            exit 1
+          }
+
+      - name: Create packages
+        run: |
+          echo "=== Creating Packages ==="
+          python package_enhanced.py
+          echo "✅ Packages created successfully"
+
+      - name: Verify packages
+        run: |
+          echo "=== Verifying Packages ==="
+          $version = (Get-Content version_info.txt -TotalCount 1).Trim()
+          echo "Version: $version"
+
+          $expectedFiles = @(
+            "StarRailAssistant_$version.zip",
+            "StarRailAssistant_Lite_$version.zip",
+            "StarRailAssistant_Core_$version.zip",
+            "version_info.txt"
+          )
+
+          foreach ($file in $expectedFiles) {
+            if (Test-Path $file) {
+              $size = (Get-Item $file).Length
+              echo "✅ $file ($([math]::Round($size/1MB, 2)) MB)"
+            } else {
+              echo "❌ Missing: $file"
+              exit 1
+            }
+          }
+
+      - name: Read version for artifacts
+        id: version
+        run: |
+          $version = (Get-Content version_info.txt -TotalCount 1).Trim()
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "Version set to: $version"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarRailAssistant-Build-${{ steps.version.outputs.version }}
+          path: |
+            StarRailAssistant_*.zip
+            version_info.txt
+          retention-days: 30
+
+      - name: Create release (if on master)
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          echo "=== Creating Release ==="
+          $version = "${{ steps.version.outputs.version }}"
+          $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+          $tagName = "test-build-$timestamp"
+
+          $releaseNotes = @"
+          🧪 **Fork 测试构建**
+
+          **构建信息:**
+          - 版本: $version
+          - 构建时间: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+          - 分支: ${{ github.ref_name }}
+          - 提交: ${{ github.sha }}
+
+          **⚠️ 重要提示:**
+          这是一个自动化测试构建，仅用于开发和测试目的。
+
+          **📦 下载说明:**
+          - `StarRailAssistant_*.zip` - 完整版 (包含所有组件)
+          - `StarRailAssistant_Lite_*.zip` - 精简版 (仅前端)
+          - `StarRailAssistant_Core_*.zip` - 核心版 (Python 组件)
+
+          **🔧 技术信息:**
+          - .NET 8.0 Runtime Required
+          - Windows x64 架构
+          - 通过 GitHub Actions 自动构建
+          "@
+
+          try {
+            gh release create $tagName `
+              --target ${{ github.sha }} `
+              --title "Test Build $version - $timestamp" `
+              --notes $releaseNotes `
+              --prerelease `
+              StarRailAssistant_*.zip version_info.txt
+            echo "✅ Release created successfully: $tagName"
+          } catch {
+            echo "❌ Failed to create release: $_"
+            echo "Continuing without release..."
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "=== Build Summary ==="
+          echo "Build Status: ${{ job.status }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Trigger: ${{ github.event_name }}"
+
+          if (Test-Path "version_info.txt") {
+            $version = (Get-Content version_info.txt -TotalCount 1).Trim()
+            echo "Version: $version"
+          }
+
+          echo ""
+          echo "📊 **Artifacts Generated:**"
+          Get-ChildItem "StarRailAssistant_*.zip" -ErrorAction SilentlyContinue | ForEach-Object {
+            $size = [math]::Round($_.Length/1MB, 2)
+            echo "- $($_.Name) ($size MB)"
+          }
