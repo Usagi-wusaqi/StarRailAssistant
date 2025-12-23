@@ -1,0 +1,99 @@
+name: Fork Build (Fixed)
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore .NET dependencies
+        run: |
+          dotnet restore SRAFrontend\SRAFrontend.csproj
+
+      - name: Build .NET project
+        run: |
+          dotnet build SRAFrontend\SRAFrontend.csproj -c Release --no-restore
+
+      - name: Publish .NET project
+        run: |
+          dotnet publish SRAFrontend\SRAFrontend.csproj -c Release -r win-x64 --self-contained false --no-build
+
+      - name: Create packages with complete method
+        run: |
+          python package_complete.py
+
+      - name: Read version for artifacts
+        id: version
+        run: |
+          $version = (Get-Content version_info.txt -TotalCount 1).Trim()
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarRailAssistant-Fixed-${{ steps.version.outputs.version }}
+          path: |
+            StarRailAssistant_*.zip
+            version_info.txt
+
+      - name: Create test release
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+          $tagName = "fixed-build-$timestamp"
+
+          $releaseNotes = @"
+          🔧 **修复版本构建**
+
+          **版本**: $version
+          **构建时间**: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+          **修复内容**:
+          - ✅ 包含完整的 Python 后端组件
+          - ✅ 自动处理 nuitka 编译失败情况
+          - ✅ 提供 Python 脚本替代方案
+          - ✅ 确保核心功能可正常运行
+
+          **📦 下载说明**:
+          - StarRailAssistant_*.zip - 完整版 (推荐)
+          - StarRailAssistant_Lite_*.zip - 仅前端
+          - StarRailAssistant_Core_*.zip - 核心组件
+
+          **⚠️ 注意**: 如果遇到 "找不到 SRA-cli.exe" 错误，请使用 SRA-cli.bat 启动
+          "@
+
+          gh release create $tagName `
+            --target ${{ github.sha }} `
+            --title "Fixed Build $version - $timestamp" `
+            --notes $releaseNotes `
+            --prerelease `
+            StarRailAssistant_*.zip version_info.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
