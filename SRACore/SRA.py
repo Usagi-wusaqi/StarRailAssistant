@@ -212,6 +212,11 @@ class SRACli(cmd.Cmd):
         """Show version information"""
         print(f"{VERSION}")
 
+    def do_test_notify(self, _):
+        """Test notification functionality"""
+        from SRACore.util.notify import test_notification
+        test_notification()  # 函数内部已经处理了所有日志输出
+
     @staticmethod
     def is_admin() -> bool:
         """检查当前用户是否具有管理员权限（仅限 Windows）"""

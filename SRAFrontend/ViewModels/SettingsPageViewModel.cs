@@ -17,6 +17,7 @@ public partial class SettingsPageViewModel : PageViewModel
     private readonly CommonModel _commonModel;
     private readonly AvaloniaList<CustomizableKey> _customizableKeys;
     private readonly CustomizableKey _startStopKey;
+    private readonly SraService _sraService;
 
     private readonly SettingsService _settingsService;
     private readonly UpdateService _updateService;
@@ -25,13 +26,15 @@ public partial class SettingsPageViewModel : PageViewModel
     public SettingsPageViewModel(SettingsService settingsService,
         UpdateService updateService,
         CacheService cacheService,
-        CommonModel commonModel) : base(PageName.Setting,
+        CommonModel commonModel,
+        SraService sraService) : base(PageName.Setting,
         "\uE272")
     {
         _settingsService = settingsService;
         _updateService = updateService;
         _cacheService = cacheService;
         _commonModel = commonModel;
+        _sraService = sraService;
         // 任务通用设置中的 启动/停止 快捷键（非游戏内快捷键分组）
         _startStopKey = new CustomizableKey(ListenKeyFor)
         {
@@ -158,13 +161,32 @@ public partial class SettingsPageViewModel : PageViewModel
     {
         _ = _commonModel.CheckForUpdatesAsync();
     }
-    
+
     [RelayCommand]
     private void CreateDesktopShortcut()
     {
         _ = _commonModel.CheckDesktopShortcut(true);
     }
-    
+
+    [RelayCommand]
+    private void TestNotification()
+    {
+        try
+        {
+            // 调用Python后端的测试通知命令
+            _sraService.SendInput("test_notify");
+
+            // 提示用户查看控制台输出获取详细结果
+            Cache.CdkStatus = "测试通知命令已发送，请查看控制台输出了解详细结果";
+            Cache.CdkStatusForeground = "#279F27";
+        }
+        catch (Exception ex)
+        {
+            Cache.CdkStatus = $"发送失败: {ex.Message}";
+            Cache.CdkStatusForeground = "#F5222D";
+        }
+    }
+
     [RelayCommand]
     private void OpenFolder(string folder)
     {

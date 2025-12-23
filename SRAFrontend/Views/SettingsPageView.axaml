@@ -85,7 +85,7 @@
                                                     <Button Grid.Column="3"
                                                             Classes="Icon"
                                                             FontFamily="{StaticResource Phosphor}"
-                                                            Content="&#xE036;" 
+                                                            Content="&#xE036;"
                                                             Command="{Binding ResetToDefaultCommand}"/>
                                                 </Grid>
                                             </DataTemplate>
@@ -172,6 +172,9 @@
                                                       IsChecked="{Binding Settings.AllowSystemNotifications}" />
                                             <CheckBox Content="{x:Static lang:Resources.EmailNotificationText}"
                                                       IsChecked="{Binding Settings.AllowEmailNotifications}" />
+                                            <Button Content="{x:Static lang:Resources.TestNotificationText}"
+                                                    HorizontalAlignment="Left"
+                                                    Command="{Binding TestNotificationCommand}" />
                                             <Expander Header="SMTP设置">
                                                 <Grid RowDefinitions="Auto,*,*,*,*" ColumnDefinitions="*,*">
                                                     <Label Grid.Row="0" Grid.Column="0" Content="SMTP服务器" />
