@@ -1,0 +1,64 @@
+name: Simple Release
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  simple-build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Build .NET (if possible)
+        run: |
+          dotnet restore SRAFrontend\SRAFrontend.csproj
+          dotnet build SRAFrontend\SRAFrontend.csproj -c Release
+          dotnet publish SRAFrontend\SRAFrontend.csproj -c Release -r win-x64 --self-contained false
+        continue-on-error: true
+
+      - name: Create simple release
+        run: python create_simple_release.py
+
+      - name: Get version
+        id: version
+        run: |
+          $version = (Get-Content version_info.txt -TotalCount 1).Trim()
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarRailAssistant-Simple-${{ steps.version.outputs.version }}
+          path: |
+            StarRailAssistant_*.zip
+            version_info.txt
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/master'
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $tag = "simple-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+
+          gh release create $tag StarRailAssistant_*.zip version_info.txt `
+            --title "Simple Release $version" `
+            --notes "🎯 **超简单发行版** - 直接解压即用，无复杂配置" `
+            --prerelease
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

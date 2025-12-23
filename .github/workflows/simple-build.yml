@@ -57,9 +57,9 @@ jobs:
             exit 1
           }
 
-      - name: Create packages
+      - name: Create simple release package
         run: |
-          python package_complete.py
+          python create_simple_release.py
 
       - name: Read version
         id: version

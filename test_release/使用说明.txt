@@ -1,0 +1,32 @@
+# StarRailAssistant v2.4.0-beta.1
+
+## 使用方法
+
+### 方法一：运行前端 (推荐)
+双击 `SRA.exe` 启动图形界面
+
+### 方法二：运行后端
+双击 `SRA-cli.bat` 启动命令行版本
+
+### 方法三：Python 直接运行
+```
+python main.py
+```
+
+## 系统要求
+- Windows 10/11
+- .NET 8.0 Runtime (运行前端需要)
+- Python 3.8+ (如果系统没有 Python，前端会提示)
+
+## 故障排除
+1. 如果提示找不到 SRA-cli.exe，请运行 SRA-cli.bat
+2. 如果 Python 相关错误，请安装 Python 3.8+
+3. 如果 .NET 相关错误，请安装 .NET 8.0 Runtime
+
+## 文件说明
+- SRA.exe - 前端图形界面
+- SRA-cli.bat - 后端启动脚本
+- main.py - Python 主程序
+- SRACore/ - 核心功能模块
+- resources/ - 游戏资源文件
+- tasks/ - 任务定义文件
