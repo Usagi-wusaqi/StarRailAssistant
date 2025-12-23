@@ -1,0 +1,187 @@
+#   Fork版本构建工作流 - 用于测试复刻仓库的更改
+#   适用于复刻的 StarRailAssistant 仓库
+
+name: Fork Build StarRailAssistant
+
+on:
+  push:
+    branches: [ master ]  # 当推送到 master 分支时触发
+  pull_request:
+    branches: [ master ]  # 当创建针对 master 分支的 PR 时触发
+  workflow_dispatch:      # 允许手动触发
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8.0 Core
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore .NET dependencies
+        run: |
+          dotnet restore .\SRAFrontend\SRAFrontend.sln
+
+      - name: Build StarRailAssistant (Debug for diagnostics)
+        run: |
+          dotnet build -c Release .\SRAFrontend\SRAFrontend.sln --verbosity normal
+
+      - name: Publish StarRailAssistant
+        run: |
+          dotnet publish -c Release -r win-x64 .\SRAFrontend\SRAFrontend.sln --verbosity normal
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pytest
+          echo "Installing requirements..."
+          pip install -r requirements.txt
+          echo "Dependencies installed successfully"
+
+      - name: Lint with flake8
+        run: |
+          echo "Running flake8 syntax check..."
+          # stop the build if there are Python syntax errors or undefined names
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          echo "Flake8 check completed"
+
+      - name: Check Python files
+        run: |
+          echo "Checking Python files..."
+          python -c "import sys; print(f'Python version: {sys.version}')"
+          if (Test-Path "main.py") { python -c "import main; print('main.py imports successfully')" }
+          if (Test-Path "package.py") { python -c "import package; print('package.py imports successfully')" }
+          echo "Python files check completed"
+
+      - name: Built with package.py
+        run: |
+          echo "Starting package.py build..."
+          python package.py
+          echo "Package.py build completed"
+
+      - name: Read version
+        id: read_version
+        run: |
+          $VERSION=(Get-Content -Path "version_info.txt" -TotalCount 1).Trim()
+          $CHANNEL=$VERSION.Contains("-beta") ? "beta" : "stable"
+          echo "version=$VERSION" >> $env:GITHUB_ENV
+          echo "channel=$CHANNEL" >> $env:GITHUB_ENV
+          echo "Version: $VERSION"
+          echo "Channel: $CHANNEL"
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --no-progress --yes
+
+      - name: Prepare for Inno Setup
+        run: |
+          Expand-Archive -Path StarRailAssistant_${{ env.version }}.zip -DestinationPath StarRailAssistant
+          Copy-Item version_info.txt -Destination setup\install_info.txt -Force
+
+      - name: Build Installer
+        run: |
+          New-Item -ItemType Directory -Path setup\SRA -Force
+          Copy-Item -Path StarRailAssistant\* -Destination setup\SRA -Force -Recurse
+          New-Item -ItemType Directory -Path setup\output -Force
+          python setup/version_modifier.py --version "${{ env.version }}"
+          iscc setup\srasetup.iss
+          Copy-Item -Path setup\output\* -Destination . -Force
+
+      - name: Upload Setup Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarRailAssistant_${{ env.version }}_setup
+          path: StarRailAssistant_${{ env.version }}_Setup.exe
+
+      - name: Upload Full zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarRailAssistant_${{ env.version }}
+          path: StarRailAssistant_${{ env.version }}.zip
+
+      - name: Upload Lite zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarRailAssistant_Lite_${{ env.version }}
+          path: StarRailAssistant_Lite_${{ env.version }}.zip
+
+      - name: Upload Core zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarRailAssistant_Core_${{ env.version }}
+          path: StarRailAssistant_Core_${{ env.version }}.zip
+
+      - name: Upload Version_Info Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: version_info
+          path: version_info.txt
+
+  create_test_release:
+    name: Create Test Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'  # 只在 master 分支创建 release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: StarRailAssistant_*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Download Version_Info
+        uses: actions/download-artifact@v4
+        with:
+          name: version_info
+          path: ./
+
+      - name: Create Test Release
+        run: |
+          set -xe
+          shopt -s nullglob
+          VERSION="$(sed 's/\r$//g' <(head -n 1 version_info.txt))"
+          TAGNAME="test-$VERSION-$(date +%Y%m%d-%H%M%S)"
+          NOTES="🧪 **测试版本构建**
+
+          基于版本: $VERSION
+          构建时间: $(date '+%Y-%m-%d %H:%M:%S UTC')
+          分支: ${{ github.ref_name }}
+          提交: ${{ github.sha }}
+
+          ⚠️ **注意**: 这是一个测试构建，仅用于开发和测试目的。
+
+          📦 **下载说明**:
+          - \`StarRailAssistant_*.zip\` - 完整版免安装包
+          - \`StarRailAssistant_Lite_*.zip\` - 精简版免安装包
+          - \`StarRailAssistant_Core_*.zip\` - 核心版免安装包
+          - \`StarRailAssistant_*_Setup.exe\` - 安装程序
+
+          🔧 **本构建通过 GitHub Actions 自动生成**"
+
+          gh release create "$TAGNAME" \
+            --target "${{ github.sha }}" \
+            --title "Test Build - $VERSION" \
+            --notes "$NOTES" \
+            --prerelease \
+            artifacts/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

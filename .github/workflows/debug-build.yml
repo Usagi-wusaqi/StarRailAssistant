@@ -1,0 +1,136 @@
+#   Debug 构建工作流 - 用于诊断构建问题
+
+name: Debug Build
+
+on:
+  workflow_dispatch:      # 只允许手动触发
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  debug_build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8.0 Core
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Test .NET Build
+        run: |
+          echo "Testing .NET build..."
+          dotnet --version
+          dotnet restore .\SRAFrontend\SRAFrontend.sln
+          dotnet build -c Release .\SRAFrontend\SRAFrontend.sln --verbosity normal
+          echo ".NET build test completed"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test Python Environment
+        run: |
+          echo "Testing Python environment..."
+          python --version
+          python -c "import sys; print('Python executable:', sys.executable)"
+          python -c "import os; print('Current directory:', os.getcwd())"
+          echo "Python environment test completed"
+
+      - name: Install Basic Dependencies
+        run: |
+          echo "Installing basic dependencies..."
+          python -m pip install --upgrade pip
+          pip install flake8
+          echo "Basic dependencies installed"
+
+      - name: Test Requirements Installation
+        run: |
+          echo "Testing requirements installation..."
+          pip install -r requirements.txt
+          echo "Requirements installed successfully"
+
+      - name: Test Python Imports
+        run: |
+          echo "Testing Python imports..."
+          python -c "import json; print('json import OK')"
+          python -c "import os; print('os import OK')"
+          python -c "import sys; print('sys import OK')"
+          python -c "import shutil; print('shutil import OK')"
+          python -c "from pathlib import Path; print('pathlib import OK')"
+          echo "Basic imports test completed"
+
+      - name: Test Main Files
+        run: |
+          echo "Testing main files..."
+          if (Test-Path "main.py") {
+            echo "main.py exists"
+            python -c "print('Testing main.py import...')"
+            # 不直接导入 main.py，因为它可能有依赖问题
+          } else {
+            echo "main.py not found"
+          }
+
+          if (Test-Path "package.py") {
+            echo "package.py exists"
+            python -c "print('Testing package.py import...')"
+            # 不直接导入 package.py，因为它会执行构建
+          } else {
+            echo "package.py not found"
+          }
+
+          if (Test-Path "version.json") {
+            echo "version.json exists"
+            python -c "import json; data=json.load(open('version.json')); print('Version:', data['version'])"
+          } else {
+            echo "version.json not found"
+          }
+          echo "Main files test completed"
+
+      - name: Test Nuitka Installation
+        run: |
+          echo "Testing Nuitka installation..."
+          pip install nuitka
+          python -c "import nuitka; print('Nuitka version:', nuitka.__version__)"
+          echo "Nuitka installation test completed"
+
+      - name: List Directory Contents
+        run: |
+          echo "Listing directory contents..."
+          Get-ChildItem -Force
+          echo "Directory listing completed"
+
+      - name: Test Package.py (Dry Run)
+        run: |
+          echo "Testing package.py structure..."
+          python -c "
+          import json
+          import os
+          from pathlib import Path
+
+          root_path = Path('.').resolve()
+          print(f'Root path: {root_path}')
+
+          version_file = root_path / 'version.json'
+          if version_file.exists():
+              with version_file.open('r', encoding='utf-8') as f:
+                  version = json.load(f)
+              print(f'Version loaded: {version[\"version\"]}')
+          else:
+              print('version.json not found')
+
+          # 检查必要的目录
+          dirs_to_check = ['SRAFrontend', 'resources', 'rapidocr_onnxruntime', 'tasks', 'SRACore']
+          for dir_name in dirs_to_check:
+              dir_path = root_path / dir_name
+              if dir_path.exists():
+                  print(f'{dir_name}: EXISTS')
+              else:
+                  print(f'{dir_name}: MISSING')
+          "
+          echo "Package.py structure test completed"
