@@ -1,0 +1,41 @@
+name: Test .NET Build Only
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test_dotnet:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8.0
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Show .NET info
+        run: |
+          dotnet --version
+          dotnet --info
+
+      - name: List SRAFrontend directory
+        run: |
+          Get-ChildItem .\SRAFrontend\ -Recurse -Name
+
+      - name: Restore dependencies
+        run: |
+          dotnet restore .\SRAFrontend\SRAFrontend.csproj
+
+      - name: Build project
+        run: |
+          dotnet build .\SRAFrontend\SRAFrontend.csproj -c Release
+
+      - name: Publish project
+        run: |
+          dotnet publish .\SRAFrontend\SRAFrontend.csproj -c Release -r win-x64 --self-contained false
+
+      - name: List publish output
+        run: |
+          Get-ChildItem .\SRAFrontend\bin\Release\net8.0\win-x64\publish\ -Name

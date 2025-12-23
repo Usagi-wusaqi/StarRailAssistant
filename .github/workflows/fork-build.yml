@@ -26,9 +26,17 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      - name: Restore .NET dependencies
+        run: |
+          dotnet restore .\SRAFrontend\SRAFrontend.sln
+
+      - name: Build StarRailAssistant
+        run: |
+          dotnet build -c Release .\SRAFrontend\SRAFrontend.sln
+
       - name: Publish StarRailAssistant
         run: |
-          dotnet publish -c Release -r win-x64 .\SRAFrontend\SRAFrontend.sln
+          dotnet publish .\SRAFrontend\SRAFrontend.csproj -c Release -r win-x64 --self-contained false -o .\SRAFrontend\bin\Release\net8.0\win-x64\publish
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
