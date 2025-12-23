@@ -16,6 +16,27 @@ def log(message, level="INFO"):
     """统一的日志输出"""
     print(f"[{level}] {message}")
 
+def safe_rmtree(path):
+    """安全删除目录，处理文件锁定问题"""
+    import time
+    max_retries = 3
+    for i in range(max_retries):
+        try:
+            if path.exists():
+                shutil.rmtree(path)
+            return True
+        except PermissionError as e:
+            if i < max_retries - 1:
+                log(f"⚠️  File locked, retrying in 2 seconds... ({i+1}/{max_retries})", "WARN")
+                time.sleep(2)
+            else:
+                log(f"❌ Could not remove {path}: {e}", "ERROR")
+                return False
+        except Exception as e:
+            log(f"❌ Error removing {path}: {e}", "ERROR")
+            return False
+    return False
+
 def create_complete_package(root_path, version):
     """创建完整的可运行包"""
     log("📦 Creating complete runnable package...")
@@ -202,6 +223,14 @@ sys.path.insert(0, os.path.join(base_dir, 'Lib', 'site-packages'))
 '''
     (main_dist / "sitecustomize.py").write_text(pth_content, encoding='utf-8')
 
+    # 创建 pyvenv.cfg 文件
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    pyvenv_content = f'''home = {sys.executable}
+include-system-site-packages = false
+version = {python_version}
+'''
+    (main_dist / "pyvenv.cfg").write_text(pyvenv_content, encoding='utf-8')
+
     log("✅ Complete package created successfully")
     return True
 
@@ -240,7 +269,7 @@ def create_packages(root_path, version):
 
     core_zip = f"StarRailAssistant_Core_v{version_str}"
     shutil.make_archive(str(root_path / core_zip), "zip", core_temp, ".")
-    shutil.rmtree(core_temp)
+    safe_rmtree(core_temp)
 
     # 精简包 (只有 .NET 前端)
     dotnet_publish = root_path / "SRAFrontend/bin/Release/net8.0/win-x64/publish"
@@ -250,7 +279,7 @@ def create_packages(root_path, version):
         shutil.make_archive(str(root_path / lite_zip), "zip", dotnet_publish, ".")
 
     # 清理
-    shutil.rmtree(main_dist)
+    safe_rmtree(main_dist)
 
     log("✅ All packages created!")
     return True
