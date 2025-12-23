@@ -1,4 +1,4 @@
-name: Fork Build (Fixed)
+name: Simple Fork Build
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -33,23 +33,35 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Restore .NET dependencies
+      - name: Clean and restore .NET
         run: |
-          dotnet restore SRAFrontend\SRAFrontend.csproj --runtime win-x64
+          dotnet clean SRAFrontend\SRAFrontend.csproj
+          dotnet restore SRAFrontend\SRAFrontend.csproj
 
-      - name: Build .NET project
+      - name: Build .NET project (Any CPU first)
         run: |
-          dotnet build SRAFrontend\SRAFrontend.csproj -c Release --runtime win-x64 --no-restore
+          dotnet build SRAFrontend\SRAFrontend.csproj -c Release
 
-      - name: Publish .NET project
+      - name: Publish .NET project (win-x64)
         run: |
-          dotnet publish SRAFrontend\SRAFrontend.csproj -c Release --runtime win-x64 --self-contained false --no-build --output SRAFrontend\bin\Release\net8.0\win-x64\publish
+          dotnet publish SRAFrontend\SRAFrontend.csproj -c Release -r win-x64 --self-contained false
 
-      - name: Create packages with complete method
+      - name: Verify .NET publish output
+        run: |
+          $publishDir = "SRAFrontend\bin\Release\net8.0\win-x64\publish"
+          if (Test-Path $publishDir) {
+            echo "✅ Publish directory exists"
+            Get-ChildItem $publishDir -Name | ForEach-Object { echo "  - $_" }
+          } else {
+            echo "❌ Publish directory missing"
+            exit 1
+          }
+
+      - name: Create packages
         run: |
           python package_complete.py
 
-      - name: Read version for artifacts
+      - name: Read version
         id: version
         run: |
           $version = (Get-Content version_info.txt -TotalCount 1).Trim()
@@ -58,40 +70,41 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: StarRailAssistant-Fixed-${{ steps.version.outputs.version }}
+          name: StarRailAssistant-Simple-${{ steps.version.outputs.version }}
           path: |
             StarRailAssistant_*.zip
             version_info.txt
 
-      - name: Create test release
+      - name: Create simple release
         if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         run: |
           $version = "${{ steps.version.outputs.version }}"
           $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-          $tagName = "fixed-build-$timestamp"
+          $tagName = "simple-build-$timestamp"
 
           $releaseNotes = @"
-          🔧 **修复版本构建**
+          🔧 **简化构建版本**
 
           **版本**: $version
           **构建时间**: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+          **构建方法**: 简化流程，确保兼容性
+
           **修复内容**:
-          - ✅ 包含完整的 Python 后端组件
-          - ✅ 自动处理 nuitka 编译失败情况
-          - ✅ 提供 Python 脚本替代方案
-          - ✅ 确保核心功能可正常运行
+          - ✅ 修复 .NET 发布配置问题
+          - ✅ 简化构建流程
+          - ✅ 包含完整的 Python 运行时
 
-          **📦 下载说明**:
-          - StarRailAssistant_*.zip - 完整版 (推荐)
-          - StarRailAssistant_Lite_*.zip - 仅前端
-          - StarRailAssistant_Core_*.zip - 核心组件
+          **📦 使用说明**:
+          1. 下载 StarRailAssistant_v*.zip (完整版)
+          2. 解压到任意目录
+          3. 运行 SRA.exe (前端) 或 SRA-cli.bat (后端测试)
 
-          **⚠️ 注意**: 如果遇到 "找不到 SRA-cli.exe" 错误，请使用 SRA-cli.bat 启动
+          **⚠️ 注意**: 需要 .NET 8.0 Runtime
           "@
 
           gh release create $tagName `
             --target ${{ github.sha }} `
-            --title "Fixed Build $version - $timestamp" `
+            --title "Simple Build $version - $timestamp" `
             --notes $releaseNotes `
             --prerelease `
             StarRailAssistant_*.zip version_info.txt

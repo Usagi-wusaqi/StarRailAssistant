@@ -1,0 +1,229 @@
+name: Robust Fork Build
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+          dotnet-quality: 'ga'
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify environment
+        run: |
+          echo "=== Environment Check ==="
+          dotnet --version
+          dotnet --info
+          python --version
+          echo "Working directory: $(pwd)"
+          echo "Repository contents:"
+          Get-ChildItem -Name
+
+      - name: Install Python dependencies
+        run: |
+          echo "=== Installing Python Dependencies ==="
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "Python dependencies installed successfully"
+
+      - name: Clean .NET artifacts
+        run: |
+          echo "=== Cleaning .NET Artifacts ==="
+          if (Test-Path "SRAFrontend\bin") { Remove-Item -Recurse -Force "SRAFrontend\bin" }
+          if (Test-Path "SRAFrontend\obj") { Remove-Item -Recurse -Force "SRAFrontend\obj" }
+          echo "Clean completed"
+
+      - name: Restore .NET dependencies
+        run: |
+          echo "=== Restoring .NET Dependencies ==="
+          dotnet restore SRAFrontend\SRAFrontend.csproj --verbosity normal
+          echo "Restore completed successfully"
+
+      - name: Build .NET project
+        run: |
+          echo "=== Building .NET Project ==="
+          dotnet build SRAFrontend\SRAFrontend.csproj -c Release --no-restore --verbosity normal
+          echo "Build completed successfully"
+
+      - name: Publish .NET project (Framework Dependent)
+        run: |
+          echo "=== Publishing .NET Project (Framework Dependent) ==="
+          dotnet publish SRAFrontend\SRAFrontend.csproj -c Release --no-build --verbosity normal
+          echo "Framework dependent publish completed"
+
+      - name: Publish .NET project (win-x64)
+        run: |
+          echo "=== Publishing .NET Project (win-x64) ==="
+          dotnet publish SRAFrontend\SRAFrontend.csproj -c Release -r win-x64 --self-contained false --verbosity normal
+          echo "win-x64 publish completed"
+
+      - name: Verify publish outputs
+        run: |
+          echo "=== Verifying Publish Outputs ==="
+
+          $fxDependent = "SRAFrontend\bin\Release\net8.0\publish"
+          $winx64 = "SRAFrontend\bin\Release\net8.0\win-x64\publish"
+
+          if (Test-Path $fxDependent) {
+            echo "✅ Framework dependent publish found"
+            $count = (Get-ChildItem $fxDependent).Count
+            echo "   Files: $count"
+          } else {
+            echo "❌ Framework dependent publish missing"
+          }
+
+          if (Test-Path $winx64) {
+            echo "✅ win-x64 publish found"
+            $count = (Get-ChildItem $winx64).Count
+            echo "   Files: $count"
+            echo "   Key files:"
+            Get-ChildItem $winx64 -Name | Where-Object { $_ -like "*.exe" -or $_ -like "*.dll" } | ForEach-Object { echo "     - $_" }
+          } else {
+            echo "❌ win-x64 publish missing"
+            echo "Available directories:"
+            Get-ChildItem "SRAFrontend\bin\Release" -Recurse -Directory | ForEach-Object { echo "  $($_.FullName)" }
+            exit 1
+          }
+
+      - name: Create packages
+        run: |
+          echo "=== Creating Packages ==="
+          python package_complete.py
+          echo "Package creation completed"
+
+      - name: Verify packages
+        run: |
+          echo "=== Verifying Packages ==="
+          $packages = Get-ChildItem "StarRailAssistant_*.zip"
+          if ($packages.Count -eq 0) {
+            echo "❌ No packages found"
+            exit 1
+          }
+
+          foreach ($pkg in $packages) {
+            $size = [math]::Round($pkg.Length / 1MB, 2)
+            echo "✅ $($pkg.Name) - $size MB"
+          }
+
+          if (Test-Path "version_info.txt") {
+            echo "✅ version_info.txt found"
+          } else {
+            echo "❌ version_info.txt missing"
+            exit 1
+          }
+
+      - name: Read version
+        id: version
+        run: |
+          $version = (Get-Content version_info.txt -TotalCount 1).Trim()
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "Detected version: $version"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarRailAssistant-Robust-${{ steps.version.outputs.version }}
+          path: |
+            StarRailAssistant_*.zip
+            version_info.txt
+          retention-days: 30
+
+      - name: Create release
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+          $tagName = "robust-build-$timestamp"
+
+          $releaseNotes = @"
+          🚀 **健壮构建版本**
+
+          **版本**: $version
+          **构建时间**: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')
+          **构建ID**: ${{ github.run_id }}
+
+          **✅ 构建特性**:
+          - 完整的错误检查和验证
+          - 多阶段 .NET 发布流程
+          - 包含完整 Python 运行时
+          - 自动包验证
+
+          **📦 包说明**:
+          - **StarRailAssistant_v*.zip** - 完整版 (推荐)
+          - **StarRailAssistant_Lite_v*.zip** - 仅前端
+          - **StarRailAssistant_Core_v*.zip** - Python 组件
+
+          **🔧 使用方法**:
+          1. 下载完整版 zip 文件
+          2. 解压到任意目录
+          3. 运行 SRA.exe (前端) 或 SRA-cli.bat (后端测试)
+
+          **⚠️ 系统要求**:
+          - Windows 10/11 x64
+          - .NET 8.0 Runtime (通常系统自带)
+
+          **🐛 问题反馈**:
+          如遇到问题，请在仓库中创建 Issue 并附上错误信息。
+          "@
+
+          try {
+            gh release create $tagName `
+              --target ${{ github.sha }} `
+              --title "Robust Build $version - $timestamp" `
+              --notes $releaseNotes `
+              --prerelease `
+              StarRailAssistant_*.zip version_info.txt
+            echo "✅ Release created successfully: $tagName"
+          } catch {
+            echo "❌ Failed to create release: $_"
+            echo "Continuing without release creation..."
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "=== Build Summary ==="
+          echo "Status: ${{ job.status }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Run ID: ${{ github.run_id }}"
+
+          if (Test-Path "version_info.txt") {
+            $version = (Get-Content version_info.txt -TotalCount 1).Trim()
+            echo "Version: $version"
+          }
+
+          echo ""
+          echo "📊 Generated Artifacts:"
+          Get-ChildItem "StarRailAssistant_*.zip" -ErrorAction SilentlyContinue | ForEach-Object {
+            $size = [math]::Round($_.Length/1MB, 2)
+            echo "- $($_.Name) ($size MB)"
+          }
+
+          echo ""
+          echo "🔗 Useful Links:"
+          echo "- Actions: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "- Releases: https://github.com/${{ github.repository }}/releases"
